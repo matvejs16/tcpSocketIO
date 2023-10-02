@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import { v4 as uuidv4 } from 'uuid';
 
 type ISocketListener = (socket: net.Socket, ...args: any[]) => void;
+type ISocketAllListener = (socket: net.Socket, eventName: string, ...args: any[]) => void;
 type ISocketConnectCallback = (socket: net.Socket) => void;
 type ISocketDisconnectCallback = (socket: net.Socket, reason?: string) => void;
 
@@ -18,6 +19,7 @@ class tcpSocketIO {
     private clients: Map<string, net.Socket> = new Map();
     private messagesCallbacks: Map<number, Function> = new Map();
     private listeners: Map<string, ISocketListener[]> = new Map();
+    private allListeners: ISocketAllListener[] = [];
     private port: number;
     private host: string;
     private defaultEncoding: string;
@@ -72,6 +74,9 @@ class tcpSocketIO {
                 if (!this.listeners.has(eventName)) return
                 this.listeners.get(eventName)?.forEach((listener) => {
                     listener(socket, ...decodedMessage);
+                })
+                this.allListeners.forEach((listener) => {
+                    listener(socket, eventName, ...decodedMessage);
                 })
                 return
             }
@@ -159,12 +164,22 @@ class tcpSocketIO {
         this.listeners.get(eventName)?.push(listener);
     }
 
+    onAllEvents(listener: ISocketAllListener) {
+        this.allListeners.push(listener);
+    }
+
     off(eventName: string, listener: ISocketListener) {
         if (!this.listeners.has(eventName)) return;
         const listeners = this.listeners.get(eventName) as ISocketListener[];
         const index = listeners.indexOf(listener);
         if (index === -1) return;
         listeners.splice(index, 1);
+    }
+
+    offAllEvents(listener: ISocketListener) {
+        const index = this.allListeners.indexOf(listener);
+        if (index === -1) return;
+        this.allListeners.splice(index, 1);
     }
 
     offAll(eventName: string) {

@@ -50,7 +50,7 @@ class tcpSocketIO {
     }
 
     private clientDisconnecHandler(socket: net.Socket, reason?: string) {
-        if (!this.clients.has(socket.clientId)) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Client [${socket.clientId}] is not connected`);
+        if (!this.clients.has(socket.clientId)) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Client [${socket.clientId}] is not connected`);
         this.disconnectCallbacks.forEach((callback) => {
             callback(socket, reason);
         })
@@ -62,9 +62,9 @@ class tcpSocketIO {
         // using regex to decode message
         const regex = /(\d+)(.*)/;
         const match = message.match(regex);
-        if (!match) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}]`);
+        if (!match) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}]`);
         const messageId = Number(match[1]);
-        if (isNaN(messageId)) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}]: Message id is not a number`);
+        if (isNaN(messageId)) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}]: Message id is not a number`);
         const messageData = match[2];
         let decodedMessage: any[];
         try {
@@ -86,7 +86,7 @@ class tcpSocketIO {
             callback(...decodedMessage);
             this.messagesCallbacks.delete(messageId);
         } catch (err) {
-            return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding array from client [${socket.clientId}]: `, err);
+            return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding array from client [${socket.clientId}]: `, err);
         }
     }
 
@@ -103,7 +103,7 @@ class tcpSocketIO {
             if (this.devLog) console.log(chalk.cyan('[tcpSocketIO]'), 'Client connected: ', socket.remoteAddress, socket.remotePort, socket.clientId);
 
             socket.on('data', (data) => {
-                const message = iconv.decode(data, this.defaultEncoding);
+                const message = this.defaultEncoding === 'utf8' ? data.toString() : iconv.decode(data, this.defaultEncoding);
                 this.messageHandler(socket, message);
             });
 
@@ -115,27 +115,27 @@ class tcpSocketIO {
     }
 
     stop() {
-        if (!this.server.listening) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
+        if (!this.server.listening) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         this.server.close();
         this.clients.clear();
         console.log(chalk.cyan('[tcpSocketIO]'), 'Server is stopped');
     }
 
     send(...message: any[]) {
-        if (!this.server.listening) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
+        if (!this.server.listening) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         let arrStr = JSON.stringify(message);
         arrStr = `0${arrStr}`
         const encodedMessage = this.defaultEncoding === 'utf8' ? arrStr : iconv.encode(arrStr, this.defaultEncoding);
 
         this.clients.forEach((client) => {
             client.write(encodedMessage, (err) => {
-                if (err) console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${client.clientId}]: `, err)
+                if (err) console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${client.clientId}]: `, err)
             })
         })
     }
 
     sendTo(clientId: string, message: any[]) {
-        if (!this.server.listening) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
+        if (!this.server.listening) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         let callback: Function | undefined;
         if (message[message.length - 1] instanceof Function) {
             callback = message.pop();
@@ -149,12 +149,12 @@ class tcpSocketIO {
         arrStr = `${messageId}${arrStr}`
         const encodedMessage = this.defaultEncoding === 'utf8' ? arrStr : iconv.encode(arrStr, this.defaultEncoding);
 
-        if (!this.clients.has(clientId)) return console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Client [${clientId}] is not connected`);
+        if (!this.clients.has(clientId)) return console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Client [${clientId}] is not connected`);
 
         if (callback) this.messagesCallbacks.set(messageId, callback);
         this.clients.get(clientId)?.write(encodedMessage, (err) => {
             if (!err) return;
-            console.log(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${clientId}]: `, err)
+            console.warn(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${clientId}]: `, err)
             if (callback) this.messagesCallbacks.delete(messageId);
         })
     }
@@ -162,6 +162,14 @@ class tcpSocketIO {
     on(eventName: string, listener: ISocketListener) {
         if (!this.listeners.has(eventName)) this.listeners.set(eventName, []);
         this.listeners.get(eventName)?.push(listener);
+    }
+
+    once(eventName: string, listener: ISocketListener) {
+        const onceListener: ISocketListener = (socket, ...args) => {
+            this.off(eventName, onceListener);
+            listener(socket, ...args);
+        }
+        this.on(eventName, onceListener);
     }
 
     onAllEvents(listener: ISocketAllListener) {

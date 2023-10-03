@@ -72,11 +72,11 @@ class tcpSocketIO {
             if (messageId === 0) {
                 const eventName = decodedMessage.pop();
                 if (!this.listeners.has(eventName)) return
-                this.listeners.get(eventName)?.forEach((listener) => {
-                    listener(socket, ...decodedMessage);
-                })
                 this.allListeners.forEach((listener) => {
                     listener(socket, eventName, ...decodedMessage);
+                })
+                this.listeners.get(eventName)?.forEach((listener) => {
+                    listener(socket, ...decodedMessage);
                 })
                 return
             }
@@ -209,3 +209,5 @@ class tcpSocketIO {
 }
 
 export default tcpSocketIO;
+
+// Example: 0["testEvent", 5333, true, false, "testEvent", "testData", "test, data", "test [string] with /special/ symbols"]

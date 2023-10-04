@@ -60,7 +60,7 @@ class tcpSocketIO {
             this.sendTo(socket.clientId, 'travelTime', () => {
                 const travelTime = process.hrtime(sendTime);
                 const travelTimeMs = travelTime[0] * 1000 + travelTime[1] / 1000000;
-                socket.ping = travelTimeMs;
+                socket.ping = travelTimeMs / 2;
                 console.log(chalk.cyan('[tcpSocketIO]'), `Client [${socket.clientId}] travel time: ${travelTimeMs}ms`);
             });
         }, 5000);

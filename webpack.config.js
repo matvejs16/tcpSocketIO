@@ -3,7 +3,9 @@ const path = require('path');
 module.exports = {
   entry: './src/index.ts', // Замените путь на путь к вашему основному файлу TypeScript
   target: 'node',
-  externals: ['node_modules'],
+  externals: ['node_modules', {
+    'iconv-lite': 'commonjs iconv-lite',
+  }],
   output: {
     library: {
       name: 'index',

@@ -96,7 +96,7 @@ class tcpSocketIO {
         let decodedMessage: any[];
         try {
             decodedMessage = JSON.parse(messageData);
-            // console.log('MessageHandler:', messageId, decodedMessage)
+            console.log('MessageHandler:', messageId, decodedMessage)
             if (messageId > 0) {
                 if (!this.messagesCallbacks.has(messageId)) return
                 const callback = this.messagesCallbacks.get(messageId) as Function;

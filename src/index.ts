@@ -1,17 +1,20 @@
 import net from 'net';
+import http from 'http';
+import WebSocket from 'ws';
 import iconv from 'iconv-lite';
 import chalk from 'chalk';
 import { v4 as uuidv4 } from 'uuid';
 
-type ISocketListener = (socket: net.Socket, ...args: any[]) => void;
-type ISocketAllListener = (socket: net.Socket, eventName: string, ...args: any[]) => void;
-type ISocketConnectCallback = (socket: net.Socket) => void;
-type ISocketDisconnectCallback = (socket: net.Socket, reason?: string) => void;
+type ISocketListener = (socket: WebSocket.WebSocket, ...args: any[]) => void;
+type ISocketAllListener = (socket: WebSocket.WebSocket, eventName: string, ...args: any[]) => void;
+type ISocketConnectCallback = (socket: WebSocket.WebSocket) => void;
+type ISocketDisconnectCallback = (socket: WebSocket.WebSocket, reason?: string) => void;
 
-declare module 'net' {
-    interface Socket {
+declare module 'ws' {
+    interface WebSocket {
         clientId: string;
         ping: number;
+        isAlive: boolean;
         travelTimeInterval: NodeJS.Timeout | undefined;
     }
 }
@@ -20,9 +23,10 @@ const sendCallbackTimeout = 5000;
 const splitter = '/5#$%^2+=/';
 const splitterRegex = /\/5#\$%\^2\+=\//gm
 
-class tcpSocketIO {
-    private server: net.Server;
-    private clients: Map<string, net.Socket> = new Map();
+class webSocketIO {
+    private server: WebSocket.Server
+    private httpServer: http.Server;
+    private clients: Map<string, WebSocket.WebSocket> = new Map();
     private messagesCallbacks: Map<number, Function> = new Map();
     private listeners: Map<string, ISocketListener[]> = new Map();
     private allListeners: ISocketAllListener[] = [];
@@ -38,12 +42,11 @@ class tcpSocketIO {
         this.devLog = devLog;
         this.port = port;
         this.host = host;
-        this.server = net.createServer({
-            noDelay: true
-        });
+        this.httpServer = http.createServer();
+        this.server = new WebSocket.Server({ server: this.httpServer });
     }
 
-    private clientConnectHandler(socket: net.Socket) {
+    private clientConnectHandler(socket: WebSocket.WebSocket) {
         let clientId = uuidv4();
         while (this.clients.has(clientId)) {
             clientId = uuidv4();
@@ -52,28 +55,32 @@ class tcpSocketIO {
         this.clients.set(clientId, socket);
         socket.clientId = clientId;
         socket.ping = -1;
+        socket.isAlive = true;
 
         socket.travelTimeInterval = setInterval(() => {
             if (!this.clients.has(socket.clientId)) {
                 clearInterval(socket.travelTimeInterval);
                 return socket.travelTimeInterval = undefined;
             }
+            if (!socket.isAlive) return socket.terminate();
+            socket.isAlive = false;
             const sendTime = process.hrtime()
             this.sendTo(socket.clientId, 'travelTime', () => {
+                socket.isAlive = true;
                 const travelTime = process.hrtime(sendTime);
                 const travelTimeMs = travelTime[0] * 1000 + travelTime[1] / 1000000;
                 socket.ping = travelTimeMs / 2;
-                console.log(chalk.cyan('[tcpSocketIO]'), `Client [${socket.clientId}] travel time: ${travelTimeMs}ms`);
+                console.log(chalk.cyan('[webSocketIO]'), `Client [${socket.clientId}] travel time: ${travelTimeMs}ms`);
             });
-        }, 5000);
+        }, 30000);
 
         this.connectCallbacks.forEach((callback) => {
             callback(socket);
         })
     }
 
-    private clientDisconnecHandler(socket: net.Socket, reason?: string) {
-        if (!this.clients.has(socket.clientId)) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Client [${socket.clientId}] is not connected`);
+    private clientDisconnecHandler(socket: WebSocket.WebSocket, reason?: string) {
+        if (!this.clients.has(socket.clientId)) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Client [${socket.clientId}] is not connected`);
         this.disconnectCallbacks.forEach((callback) => {
             callback(socket, reason);
         })
@@ -87,14 +94,14 @@ class tcpSocketIO {
         }
     }
 
-    private messageHandler(socket: net.Socket, message: string) {
+    private messageHandler(socket: WebSocket.WebSocket, message: string) {
         // using regex to decode message
         // console.log('MessageHandlerFirst:', message)
         const regex = /(\d+)(.*)/;
         const match = message.match(regex);
-        if (!match) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}] | Message:`, message);
+        if (!match) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}] | Message:`, message);
         const messageId = Number(match[1]);
-        if (isNaN(messageId)) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}]: Message id is not a number`);
+        if (isNaN(messageId)) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}]: Message id is not a number`);
         const messageData = removeInvisibleSymbols(match[2].trim())
         let decodedMessage: any[];
         try {
@@ -108,7 +115,6 @@ class tcpSocketIO {
             }
             
             const eventName = decodedMessage.shift();
-            if (eventName === 'ping') return this.sendTo(socket.clientId, 'pong');
             this.allListeners.forEach((listener) => {
                 listener(socket, eventName, ...decodedMessage);
             })
@@ -117,65 +123,61 @@ class tcpSocketIO {
                 listener(socket, ...decodedMessage);
             })
         } catch (err) {
-            return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding array from client [${socket.clientId}]: `, err, '| Message:', message);
+            return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error while decoding array from client [${socket.clientId}]: `, err, '| Message:', message);
         }
     }
 
     start(callback?: Function) {
-        if (this.server.listening) return console.log(chalk.cyan('[tcpSocketIO]'), 'Server is already running');
+        if (this.httpServer.listening) return console.log(chalk.cyan('[webSocketIO]'), 'Server is already running');
 
-        this.server.on('connection', (socket) => {
+        this.server.on('connection', (socket: WebSocket.WebSocket, req) => {
             this.clientConnectHandler(socket);
-            if (this.devLog) console.log(chalk.cyan('[tcpSocketIO]'), 'Client connected: ', socket.remoteAddress, socket.remotePort, socket.clientId);
+            if (this.devLog) console.log(chalk.cyan('[webSocketIO]'), 'Client connected: ', req.socket.remoteAddress, req.socket.remotePort, socket.clientId);
 
-            socket.on('data', (data) => {
+            socket.on('message', (data: Buffer) => {
                 const message = this.defaultEncoding === 'utf8' ? data.toString() : iconv.decode(data, this.defaultEncoding);
-                const messages = message.split(splitterRegex);
-                messages.forEach(async (thisMessage) => {
-                    if (!thisMessage) return;
-                    this.messageHandler(socket, thisMessage);
-                })
+                this.messageHandler(socket, message);
             });
 
-            socket.on('end', () => {
-                if (this.devLog) console.log(chalk.cyan('[tcpSocketIO]'), 'Client disconnected: ', socket.remoteAddress, socket.remotePort, socket.clientId);
+            socket.on('close', () => {
+                if (this.devLog) console.log(chalk.cyan('[webSocketIO]'), 'Client disconnected: ', req.socket.remoteAddress, req.socket.remotePort, socket.clientId);
                 this.clientDisconnecHandler(socket, 'end');
             })
 
             socket.on('error', (err) => {
-                if (this.devLog) console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error from client [${socket.clientId}]: `, err);
+                if (this.devLog) console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error from client [${socket.clientId}]: `, err);
                 this.clientDisconnecHandler(socket, 'error');
             })
         })
 
-        this.server.listen(this.port, this.host, () => {
-            if (this.devLog) console.log(chalk.cyan('[tcpSocketIO]'), `Server is listening on host ${this.host} and port ${this.port}`);
+        this.httpServer.listen(this.port, this.host, () => {
+            if (this.devLog) console.log(chalk.cyan('[webSocketIO]'), `Server is listening on host ${this.host} and port ${this.port}`);
             if (callback) callback();
         })
     }
 
     stop() {
-        if (!this.server.listening) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
+        if (!this.httpServer.listening) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         this.server.close();
         this.clients.clear();
-        console.log(chalk.cyan('[tcpSocketIO]'), 'Server is stopped');
+        console.log(chalk.cyan('[webSocketIO]'), 'Server is stopped');
     }
 
     send(...message: any[]) {
-        if (!this.server.listening) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
+        if (!this.httpServer.listening) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         let arrStr = JSON.stringify(message);
         arrStr = `0${arrStr}${splitter}`
         const encodedMessage = this.defaultEncoding === 'utf8' ? arrStr : iconv.encode(arrStr, this.defaultEncoding);
 
         this.clients.forEach((client) => {
-            client.write(encodedMessage, (err) => {
-                if (err) console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${client.clientId}]: `, err)
+            client.send(encodedMessage, (err) => {
+                if (err) console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${client.clientId}]: `, err)
             })
         })
     }
 
     sendTo(clientId: string, ...message: any[]) {
-        if (!this.server.listening) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
+        if (!this.httpServer.listening) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         let callback: Function | undefined;
         if (message[message.length - 1] instanceof Function) {
             callback = message.pop() as Function;
@@ -189,7 +191,7 @@ class tcpSocketIO {
         arrStr = `${messageId}${arrStr}${splitter}`
         const encodedMessage = this.defaultEncoding === 'utf8' ? arrStr : iconv.encode(arrStr, this.defaultEncoding);
 
-        if (!this.clients.has(clientId)) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Client [${clientId}] is not connected`);
+        if (!this.clients.has(clientId)) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Client [${clientId}] is not connected`);
 
         if (callback) {
             this.messagesCallbacks.set(messageId, callback);
@@ -200,9 +202,9 @@ class tcpSocketIO {
             }, sendCallbackTimeout);
         }
 
-        this.clients.get(clientId)?.write(encodedMessage, (err) => {
+        this.clients.get(clientId)?.send(encodedMessage, (err) => {
             if (!err) return;
-            console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${clientId}]: `, err)
+            console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error while sending message to client [${clientId}]: `, err)
             if (callback) this.messagesCallbacks.delete(messageId);
         })
     }
@@ -264,7 +266,7 @@ class tcpSocketIO {
     }
 }
 
-export default tcpSocketIO;
+export default webSocketIO;
 
 function randomNumber(min: number, max: number) {
     return Math.floor(Math.random() * (max - min + 1)) + min;

@@ -5,6 +5,7 @@ module.exports = {
   target: 'node',
   externals: ['node_modules', {
     'iconv-lite': 'commonjs iconv-lite',
+    'ws': 'commonjs ws',
   }],
   output: {
     library: {

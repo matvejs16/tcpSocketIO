@@ -1,4 +1,3 @@
-import net from 'net';
 import http from 'http';
 import WebSocket from 'ws';
 import iconv from 'iconv-lite';
@@ -20,8 +19,6 @@ declare module 'ws' {
 }
 
 const sendCallbackTimeout = 5000;
-const splitter = '/5#$%^2+=/';
-const splitterRegex = /\/5#\$%\^2\+=\//gm
 
 class webSocketIO {
     private server: WebSocket.Server
@@ -96,7 +93,7 @@ class webSocketIO {
 
     private messageHandler(socket: WebSocket.WebSocket, message: string) {
         // using regex to decode message
-        // console.log('MessageHandlerFirst:', message)
+        console.log('MessageHandlerFirst:', message)
         const regex = /(\d+)(.*)/;
         const match = message.match(regex);
         if (!match) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}] | Message:`, message);
@@ -135,6 +132,7 @@ class webSocketIO {
             if (this.devLog) console.log(chalk.cyan('[webSocketIO]'), 'Client connected: ', req.socket.remoteAddress, req.socket.remotePort, socket.clientId);
 
             socket.on('message', (data: Buffer) => {
+                console.log('Message:', data)
                 const message = this.defaultEncoding === 'utf8' ? data.toString() : iconv.decode(data, this.defaultEncoding);
                 this.messageHandler(socket, message);
             });
@@ -166,7 +164,7 @@ class webSocketIO {
     send(...message: any[]) {
         if (!this.httpServer.listening) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), 'Server is not running');
         let arrStr = JSON.stringify(message);
-        arrStr = `0${arrStr}${splitter}`
+        arrStr = `0${arrStr}`
         const encodedMessage = this.defaultEncoding === 'utf8' ? arrStr : iconv.encode(arrStr, this.defaultEncoding);
 
         this.clients.forEach((client) => {
@@ -188,7 +186,7 @@ class webSocketIO {
         while (messageId > 0 && this.messagesCallbacks.has(messageId)) {
             messageId = randomNumber(0, 2147483647);
         }
-        arrStr = `${messageId}${arrStr}${splitter}`
+        arrStr = `${messageId}${arrStr}`
         const encodedMessage = this.defaultEncoding === 'utf8' ? arrStr : iconv.encode(arrStr, this.defaultEncoding);
 
         if (!this.clients.has(clientId)) return console.error(chalk.cyan('[webSocketIO]'), chalk.red('[ERROR]'), `Client [${clientId}] is not connected`);

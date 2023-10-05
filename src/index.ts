@@ -92,7 +92,6 @@ class webSocketIO {
     }
 
     private messageHandler(socket: WebSocket.WebSocket, message: string) {
-        // using regex to decode message
         console.log('MessageHandlerFirst:', message)
         const regex = /(\d+)(.*)/;
         const match = message.match(regex);

@@ -38,10 +38,12 @@ class tcpSocketIO {
         this.devLog = devLog;
         this.port = port;
         this.host = host;
-        this.server = net.createServer();
+        this.server = net.createServer({
+            noDelay: true
+        });
     }
 
-    private clientConnecHandler(socket: net.Socket) {
+    private clientConnectHandler(socket: net.Socket) {
         let clientId = uuidv4();
         while (this.clients.has(clientId)) {
             clientId = uuidv4();
@@ -87,6 +89,7 @@ class tcpSocketIO {
 
     private messageHandler(socket: net.Socket, message: string) {
         // using regex to decode message
+        // console.log('MessageHandlerFirst:', message)
         const regex = /(\d+)(.*)/;
         const match = message.match(regex);
         if (!match) return console.error(chalk.cyan('[tcpSocketIO]'), chalk.red('[ERROR]'), `Error while decoding message from client [${socket.clientId}] | Message:`, message);
@@ -96,7 +99,7 @@ class tcpSocketIO {
         let decodedMessage: any[];
         try {
             decodedMessage = JSON.parse(messageData);
-            console.log('MessageHandler:', messageId, decodedMessage)
+            // console.log('MessageHandler:', messageId, decodedMessage)
             if (messageId > 0) {
                 if (!this.messagesCallbacks.has(messageId)) return
                 const callback = this.messagesCallbacks.get(messageId) as Function;
@@ -122,7 +125,7 @@ class tcpSocketIO {
         if (this.server.listening) return console.log(chalk.cyan('[tcpSocketIO]'), 'Server is already running');
 
         this.server.on('connection', (socket) => {
-            this.clientConnecHandler(socket);
+            this.clientConnectHandler(socket);
             if (this.devLog) console.log(chalk.cyan('[tcpSocketIO]'), 'Client connected: ', socket.remoteAddress, socket.remotePort, socket.clientId);
 
             socket.on('data', (data) => {
